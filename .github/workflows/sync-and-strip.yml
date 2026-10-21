@@ -1,0 +1,48 @@
+name: Sync upstream and strip default wake words
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build patched branch from upstream
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          git remote add upstream https://github.com/esphome/wake-word-voice-assistants.git
+          git fetch --depth 1 upstream main
+
+          git checkout --orphan patched
+          git rm -rf -q .
+          git checkout upstream/main -- .
+          git rm -rf -q --cached --ignore-unmatch .github
+          rm -rf .github
+
+          python3 - esp32-s3-box-3/esp32-s3-box-3.yaml <<'PY'
+          import re, sys
+          p = sys.argv[1]
+          s = open(p).read()
+          names = ("okay_nabu", "hey_mycroft", "hey_jarvis")
+          new, n = re.subn(r"^[ \t]*-[ \t]*(?:%s)[ \t]*\r?\n" % "|".join(names), "", s, flags=re.M)
+          if n != 3:
+              sys.exit(f"expected to remove 3 default wake words, removed {n}; upstream changed")
+          new, m = re.subn(r"^([ \t]*)models:[ \t]*\r?\n(?=[ \t]*\S)(?![ \t]*-)", r"\1models: []\n", new, flags=re.M)
+          if m != 1:
+              sys.exit(f"expected to empty the models list once, matched {m}")
+          open(p, "w").write(new)
+          print("stripped", n, "default models")
+          PY
+
+          git add -A
+          git commit -q -m "Upstream $(git rev-parse --short upstream/main) without default wake words"
+          git push --force origin patched
