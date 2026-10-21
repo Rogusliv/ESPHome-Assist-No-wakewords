@@ -1,0 +1,1 @@
+# ESPHome-Assist-No-wakewords
